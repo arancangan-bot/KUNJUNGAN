@@ -332,7 +332,7 @@
       let callQueue = [];
       let isProcessingQueue = false;
       let serverTimeOffset = 0;
-      let isOffsetReady = false;
+      let isOffsetReady = true; // ✅ LANGSUNG TRUE agar tabel langsung tampil
       const perintahPanggilanRef = collection(db, "perintah_panggilan");
       const broadcastOverlayRef = collection(db, "broadcastOverlay");
 
@@ -340,43 +340,49 @@
       const shownTimeoutOverlayIds = new Set();
       let overlayTimeout = null;
 
-      // ================== KALIBRASI WAKTU SERVER ==================
+      // ================== KALIBRASI WAKTU SERVER (tanpa blokir) ==================
       async function calibrateServerTime() {
         const savedOffset = localStorage.getItem("serverTimeOffset");
         const savedTime = localStorage.getItem("serverTimeOffsetSavedAt");
         if (savedOffset && savedTime && (Date.now() - parseInt(savedTime) < 5 * 60 * 1000)) {
           serverTimeOffset = parseInt(savedOffset);
-          isOffsetReady = true;
           return;
         }
-        const samples = [];
-        for (let i = 0; i < 5; i++) {
-          try {
-            const tempRef = doc(collection(db, "tempTime"));
-            const before = Date.now();
-            await setDoc(tempRef, { ping: serverTimestamp() });
-            const snap = await getDoc(tempRef);
-            const serverTime = snap.data().ping.toDate().getTime();
-            const after = Date.now();
-            const rtt = after - before;
-            const clientTime = before + rtt / 2;
-            const offset = serverTime - clientTime;
-            samples.push(offset);
-            await deleteDoc(tempRef);
-          } catch(e) { console.warn(e); }
-          await new Promise(r => setTimeout(r, 100));
+        try {
+          const samples = [];
+          for (let i = 0; i < 3; i++) {
+            try {
+              const tempRef = doc(collection(db, "tempTime"));
+              const before = Date.now();
+              await setDoc(tempRef, { ping: serverTimestamp() });
+              const snap = await getDoc(tempRef);
+              const serverTime = snap.data().ping.toDate().getTime();
+              const after = Date.now();
+              const rtt = after - before;
+              const clientTime = before + rtt / 2;
+              const offset = serverTime - clientTime;
+              samples.push(offset);
+              await deleteDoc(tempRef);
+            } catch(e) {}
+            await new Promise(r => setTimeout(r, 100));
+          }
+          if (samples.length > 0) {
+            samples.sort((a,b)=>a-b);
+            serverTimeOffset = samples[Math.floor(samples.length/2)];
+            localStorage.setItem("serverTimeOffset", serverTimeOffset);
+            localStorage.setItem("serverTimeOffsetSavedAt", Date.now());
+          }
+        } catch(e) {
+          console.warn("Kalibrasi gagal, gunakan offset 0");
+          serverTimeOffset = 0;
         }
-        if (samples.length === 0) { serverTimeOffset = 0; isOffsetReady = true; return; }
-        samples.sort((a,b)=>a-b);
-        serverTimeOffset = samples[Math.floor(samples.length/2)];
-        localStorage.setItem("serverTimeOffset", serverTimeOffset);
-        localStorage.setItem("serverTimeOffsetSavedAt", Date.now());
-        isOffsetReady = true;
       }
-      function getCurrentServerTime() { return Date.now() + serverTimeOffset; }
-      setInterval(() => { if(isOffsetReady) calibrateServerTime(); }, 35000);
 
-      // ================== FUNGSI SUARA (Hanya untuk panggilan ulang atau timeout realtime) ==================
+      function getCurrentServerTime() {
+        return Date.now() + serverTimeOffset;
+      }
+
+      // ================== FUNGSI SUARA ==================
       async function getSuaraPerempuan() {
         return new Promise((resolve) => {
           if(suaraPerempuan) { resolve(suaraPerempuan); return; }
@@ -448,10 +454,7 @@
       function escapeHtml(str) { if(!str) return ""; return str.replace(/[&<>]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;"})[m]); }
       
       function tampilkanOverlayFullscreen(nomor, namaPengunjung, namaWBP, tipe = 'timeout') {
-        // Untuk tipe 'ulang' (panggilan ulang), TIDAK ada pencegahan duplikat.
-        // Setiap kali tombol ditekan, overlay akan muncul.
         if (tipe === 'timeout') {
-          // Untuk timeout, cegah duplikat dalam 30 detik untuk data yang sama
           const uniqueKey = `${tipe}_${nomor}_${namaPengunjung}_${namaWBP}`;
           if (shownTimeoutOverlayIds.has(uniqueKey)) return;
           shownTimeoutOverlayIds.add(uniqueKey);
@@ -561,11 +564,7 @@
 
       let renderRequestId = null;
       async function renderTabel() {
-        if(!isOffsetReady) {
-          const tbody = document.getElementById("tabelData");
-          if(tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">⏳ Sinkronisasi waktu......</td></tr>';
-          return;
-        }
+        // ✅ HAPUS pengecekan isOffsetReady – tabel langsung digambar
         const tbody = document.getElementById("tabelData");
         if(!tbody) return;
         tbody.innerHTML = "";
@@ -580,7 +579,6 @@
           const status = hitungStatus(item);
           let nomorAntrian = item.nomor || "—";
           
-          // Panggilan otomatis saat waktu habis (realtime, setelah halaman dimuat)
           if(status.selesai && !item.sudahDipanggil) {
             try {
               await updateDoc(doc(db,"antrian",item.id), { sudahDipanggil: true });
@@ -615,10 +613,6 @@
       // ================== SILENT MARK: Tandai antrian yang sudah habis waktu TANPA suara & overlay ==================
       async function silentMarkExpiredAntrian() {
         console.log("Menjalankan silent mark untuk antrian yang sudah habis...");
-        if (!isOffsetReady) {
-          console.warn("Waktu server belum siap, tunda silent mark.");
-          return;
-        }
         try {
           const snapshot = await getDocs(collection(db, "antrian"));
           const batch = writeBatch(db);
@@ -690,8 +684,6 @@
         }
       };
       
-      // Tombol ulang panggilan: mengirim perintah suara + overlay visual ke semua perangkat
-      // Setiap klik akan langsung memicu overlay tanpa pencegahan duplikat
       window.ulangiPanggilanRow = function(nomor, nama, wbp) {
         if(!nomor || !nama || !wbp) return;
         kirimPerintahPanggilan(nomor, nama, wbp);
@@ -723,11 +715,15 @@
         if (btnTutup) btnTutup.addEventListener("click", tutupOverlayManual);
       });
 
-      window.onload = async function() {
-        await calibrateServerTime();
-        await getSuaraPerempuan();
-        // Silent mark untuk antrian yang sudah habis sebelum halaman dimuat (tanpa suara/overlay)
-        await silentMarkExpiredAntrian();
+      window.onload = function() {
+        // ✅ Jalankan kalibrasi tanpa await agar tidak memblokir
+        calibrateServerTime().catch(() => {});
+        
+        getSuaraPerempuan().catch(() => {});
+        
+        // Silent mark juga dijalankan tanpa await (opsional)
+        silentMarkExpiredAntrian().catch(() => {});
+        
         startAntrianListener();
       };
     </script>
