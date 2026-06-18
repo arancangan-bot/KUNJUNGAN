@@ -399,23 +399,84 @@
           }, 100);
         });
       }
-      async function playSuara(nomor, nama, wbp) {
+
+      // Fallback suara beep (menggunakan Web Audio API)
+      function playBeep() {
+        try {
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          // Resume context jika suspended (karena kebijakan autoplay)
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+          }
+          const durasi = 0.3;
+          const frekuensi = 800;
+          const volume = 0.3;
+
+          for (let i = 0; i < 3; i++) {
+            setTimeout(() => {
+              try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.frequency.value = frekuensi;
+                osc.type = 'sine';
+                gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+                osc.start();
+                osc.stop(audioCtx.currentTime + durasi);
+              } catch(e) { /* abaikan */ }
+            }, i * 500);
+          }
+        } catch(e) {
+          console.warn('Beep fallback gagal:', e);
+        }
+      }
+
+      // Fungsi utama untuk memainkan suara (prioritas SpeechSynthesis, fallback beep)
+      function playSuara(nomor, nama, wbp) {
         const teks = `Mohon Perhatian. Nomor antrian ${nomor}, Pengunjung atas nama ${nama}, kunjungan untuk Saudara ${wbp}, waktu kunjungan telah habis. Silakan meninggalkan ruangan kunjungan. Terima kasih.`;
+
+        // Cek apakah SpeechSynthesis tersedia
+        if (!window.speechSynthesis) {
+          console.warn('SpeechSynthesis tidak tersedia, gunakan beep fallback');
+          playBeep();
+          return;
+        }
+
+        // Coba speech
         const speech = new SpeechSynthesisUtterance(teks);
         speech.lang = "id-ID";
         speech.rate = 0.9;
         speech.pitch = 1.15;
-        speech.voice = await getSuaraPerempuan();
+        speech.volume = 1;
+
+        // Ambil voice jika ada
+        getSuaraPerempuan().then(voice => {
+          if (voice) speech.voice = voice;
+        }).catch(() => {});
+
+        // Jika gagal, fallback beep
+        speech.onerror = function(e) {
+          console.warn('Speech error, fallback beep', e);
+          playBeep();
+        };
+
+        // Batalkan suara sebelumnya agar tidak tumpang tindih
+        speechSynthesis.cancel();
         speechSynthesis.speak(speech);
       }
-      function putarBacksound() {
-        const audio = new Audio("backsound.mpeg");
-        audio.play().catch(e => console.warn("Gagal putar backsound:", e));
-      }
+
       async function panggilSekali(nomor, nama, wbp) {
-        putarBacksound();
-        await new Promise(r => setTimeout(r, 3000));
-        await playSuara(nomor, nama, wbp);
+        // Coba putar backsound (opsional) – jika gagal diabaikan
+        try {
+          const audio = new Audio("backsound.mp3"); // ubah ekstensi ke .mp3
+          audio.volume = 0.5;
+          audio.play().catch(() => {});
+        } catch(e) {}
+
+        // Tunggu sebentar lalu mainkan suara utama
+        await new Promise(r => setTimeout(r, 2000));
+        playSuara(nomor, nama, wbp);
       }
 
       async function processQueue() {
@@ -564,7 +625,6 @@
 
       let renderRequestId = null;
       async function renderTabel() {
-        // ✅ HAPUS pengecekan isOffsetReady – tabel langsung digambar
         const tbody = document.getElementById("tabelData");
         if(!tbody) return;
         tbody.innerHTML = "";
@@ -716,14 +776,9 @@
       });
 
       window.onload = function() {
-        // ✅ Jalankan kalibrasi tanpa await agar tidak memblokir
         calibrateServerTime().catch(() => {});
-        
         getSuaraPerempuan().catch(() => {});
-        
-        // Silent mark juga dijalankan tanpa await (opsional)
         silentMarkExpiredAntrian().catch(() => {});
-        
         startAntrianListener();
       };
     </script>
