@@ -283,8 +283,7 @@
         <div class="logo-left"><img src="imipas.png" alt="Kemenimipas" onerror="this.style.display='none'"></div>
         <div class="judul-utama">
           <h2>LAPAS KELAS IIA CIKARANG</h2>
-          <h2>JAM MONITORING KUNJUNGAN TERPADU</h2>
-          <h2>RANCANGAN AKTUALISASI RICKY MARTIN</h2>
+          <h2>SISTEM WAKTU KUNJUNGAN</h2>
         </div>
         <div class="header-right"><div class="logo-right"><img src="Pemasyarakatan.png" alt="Pemasyarakatan" onerror="this.style.display='none'"></div></div>
       </div>
@@ -306,8 +305,8 @@
       <div class="overlay-content">
         <h1 id="overlayJudul">⏰ WAKTU KUNJUNGAN HABIS ⏰</h1>
         <div class="overlay-nomor" id="overlayNomor">000</div>
-        <div class="overlay-detail" id="overlayNamaPengunjung">👤 Pengunjung: ---</div>
-        <div class="overlay-detail" id="overlayNamaWBP">🧑‍⚖️ WBP: ---</div>
+        <div class="overlay-detail" id="overlayNamaPengunjung"> Pengunjung: ---</div>
+        <div class="overlay-detail" id="overlayNamaWBP"> WBP: ---</div>
         <button class="overlay-tutup" id="tutupOverlayBtn">TUTUP</button>
       </div>
     </div>
@@ -466,10 +465,11 @@
         speechSynthesis.speak(speech);
       }
 
+      // ========== PERUBAHAN UTAMA: backsound.mp3 -> backsound.mpeg ==========
       async function panggilSekali(nomor, nama, wbp) {
-        // Coba putar backsound (opsional) – jika gagal diabaikan
+        // Coba putar backsound.mpeg (jika gagal diabaikan)
         try {
-          const audio = new Audio("backsound.mp3"); // ubah ekstensi ke .mp3
+          const audio = new Audio("backsound.mpeg"); // <-- NAMA FILE DIUBAH
           audio.volume = 0.5;
           audio.play().catch(() => {});
         } catch(e) {}
@@ -478,6 +478,7 @@
         await new Promise(r => setTimeout(r, 2000));
         playSuara(nomor, nama, wbp);
       }
+      // ================================================================
 
       async function processQueue() {
         if(isProcessingQueue) return;
@@ -535,8 +536,8 @@
         }
 
         document.getElementById("overlayNomor").innerText = nomor;
-        document.getElementById("overlayNamaPengunjung").innerHTML = `👤 Pengunjung: ${escapeHtml(namaPengunjung)}`;
-        document.getElementById("overlayNamaWBP").innerHTML = `🧑‍⚖️ WBP: ${escapeHtml(namaWBP)}`;
+        document.getElementById("overlayNamaPengunjung").innerHTML = ` Pengunjung: ${escapeHtml(namaPengunjung)}`;
+        document.getElementById("overlayNamaWBP").innerHTML = ` WBP: ${escapeHtml(namaWBP)}`;
         
         overlay.style.display = "flex";
         
