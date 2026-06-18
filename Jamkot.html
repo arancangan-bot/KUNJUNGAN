@@ -208,25 +208,6 @@
     }
     .overlay-tutup:hover { background: #ffdd44; transform: scale(1.02); }
 
-    /* Notifikasi */
-    #notifikasi {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 9999;
-      display: none;
-      text-align: center;
-    }
-    #notifikasi > div {
-      background: #2a7f62;
-      color: white;
-      padding: 14px 28px;
-      border-radius: 40px;
-      font-weight: bold;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-    }
-
     /* Debug info (opsional) */
     #debugInfo {
       position: fixed;
@@ -239,7 +220,7 @@
       border-radius: 8px;
       max-width: 90%;
       z-index: 99999;
-      display: none; /* tampilkan jika perlu */
+      display: none;
       pointer-events: none;
     }
 
@@ -278,7 +259,6 @@
   </div>
 
   <button class="floating-input-btn" onclick="window.location.href='input.html'">📝 Input Antrian</button>
-  <div id="notifikasi"></div>
 
   <!-- FULLSCREEN OVERLAY -->
   <div id="fullscreenOverlay" class="fullscreen-overlay">
@@ -309,7 +289,6 @@
       appId: "1:1070275298561:web:c74c42680e7fded17e8700",
     };
 
-    // Inisialisasi Firebase (compat)
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
@@ -321,16 +300,14 @@
     let isProcessingQueue = false;
     let overlayTimeout = null;
     let suaraPerempuan = null;
-    const shownTimeoutOverlayIds = new Set(); // cegah duplikat timeout 30 detik
+    const shownTimeoutOverlayIds = new Set();
 
-    // Elemen DOM
     const tbody = document.getElementById('tabelData');
     const overlay = document.getElementById('fullscreenOverlay');
     const overlayJudul = document.getElementById('overlayJudul');
     const overlayNomor = document.getElementById('overlayNomor');
     const overlayNamaPengunjung = document.getElementById('overlayNamaPengunjung');
     const overlayNamaWBP = document.getElementById('overlayNamaWBP');
-    const notifBox = document.getElementById('notifikasi');
 
     // ================== DEBUG ==================
     function debug(msg) {
@@ -350,7 +327,7 @@
         if (savedOffset && savedTime && (Date.now() - parseInt(savedTime) < 5 * 60 * 1000)) {
           serverTimeOffset = parseInt(savedOffset);
           isOffsetReady = true;
-          debug('Waktu server diambil dari cache');
+          debug('Waktu server dari cache');
           return;
         }
         const samples = [];
@@ -376,7 +353,7 @@
         localStorage.setItem('serverTimeOffset', serverTimeOffset);
         localStorage.setItem('serverTimeOffsetSavedAt', Date.now());
         isOffsetReady = true;
-        debug('Kalibrasi waktu selesai, offset: '+serverTimeOffset+' ms');
+        debug('Kalibrasi selesai, offset: '+serverTimeOffset+' ms');
       } catch(e) {
         console.warn('Kalibrasi gagal:', e);
         isOffsetReady = true;
@@ -384,14 +361,14 @@
     }
     function getCurrentServerTime() { return Date.now() + serverTimeOffset; }
 
-    // ================== FUNGSI SUARA ==================
+    // ================== FUNGSI SUARA (dengan backsound) ==================
     function isSpeechSupported() {
       return 'speechSynthesis' in window && window.speechSynthesis;
     }
 
     async function getSuaraPerempuan() {
       if (!isSpeechSupported()) {
-        debug('SpeechSynthesis tidak didukung di browser ini.');
+        debug('SpeechSynthesis tidak didukung.');
         return null;
       }
       if (suaraPerempuan) return suaraPerempuan;
@@ -408,7 +385,6 @@
             resolve(suaraPerempuan);
           }
         }, 200);
-        // timeout jika voices tidak pernah muncul
         setTimeout(() => {
           clearInterval(cek);
           if (!suaraPerempuan) {
@@ -420,9 +396,18 @@
       });
     }
 
+    function putarBacksound() {
+      try {
+        const audio = new Audio('backsound.mpeg');
+        audio.play().catch(e => console.warn('Gagal putar backsound:', e));
+      } catch(e) {
+        console.warn('Error membuat Audio:', e);
+      }
+    }
+
     async function playSuara(nomor, nama, wbp) {
       if (!isSpeechSupported()) {
-        debug('Suara tidak didukung, hanya notifikasi visual.');
+        debug('Suara tidak didukung.');
         return;
       }
       try {
@@ -441,16 +426,9 @@
       }
     }
 
-    function putarBacksound() {
-      try {
-        const audio = new Audio('backsound.mpeg');
-        audio.play().catch(e => console.warn('Gagal putar backsound:', e));
-      } catch(e) {}
-    }
-
     async function panggilSekali(nomor, nama, wbp) {
       putarBacksound();
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 3000)); // jeda agar backsound mulai
       await playSuara(nomor, nama, wbp);
     }
 
@@ -467,16 +445,14 @@
     }
     function addToQueue(fn, ...args) { callQueue.push(() => fn(...args)); processQueue(); }
 
-    // ================== PERINTAH PANGGILAN (dari tombol ulang) ==================
-    // Kita kirim ke koleksi 'perintah_panggilan' dan konsumsi di sini
+    // ================== PERINTAH PANGGILAN ==================
     async function kirimPerintahPanggilan(nomor, nama, wbp) {
       try {
         await db.collection('perintah_panggilan').add({ nomor, nama, wbp, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-        debug('Perintah panggilan dikirim ke Firestore');
+        debug('Perintah panggilan dikirim');
       } catch(e) { console.warn('Gagal kirim perintah:', e); }
     }
 
-    // Listener perintah panggilan
     let processingCommand = false;
     db.collection('perintah_panggilan').onSnapshot(async (snapshot) => {
       if (processingCommand) return;
@@ -488,7 +464,6 @@
             const { nomor, nama, wbp } = data;
             if (nomor && nama && wbp) {
               addToQueue(panggilSekali, nomor, nama, wbp);
-              // Tampilkan overlay ulang panggilan di semua layar via broadcast
               await broadcastUlangOverlay(nomor, nama, wbp);
             }
             await change.doc.ref.delete();
@@ -498,8 +473,7 @@
       finally { processingCommand = false; }
     });
 
-    // ================== BROADCAST OVERLAY (sinkron antar layar) ==================
-    // Koleksi 'broadcastOverlay' untuk menyebarkan tampilan overlay ke semua layar
+    // ================== BROADCAST OVERLAY ==================
     let processingOverlay = false;
     db.collection('broadcastOverlay').onSnapshot(async (snapshot) => {
       if (processingOverlay) return;
@@ -549,7 +523,6 @@
 
     function tampilkanOverlayFullscreen(nomor, namaPengunjung, namaWBP, tipe = 'timeout') {
       if (!overlay) return;
-      // Cegah duplikat untuk tipe timeout (30 detik)
       if (tipe === 'timeout') {
         const uniqueKey = `timeout_${nomor}_${namaPengunjung}_${namaWBP}`;
         if (shownTimeoutOverlayIds.has(uniqueKey)) {
@@ -560,7 +533,6 @@
         setTimeout(() => shownTimeoutOverlayIds.delete(uniqueKey), 30000);
       }
 
-      // Set judul
       if (overlayJudul) {
         if (tipe === 'ulang') overlayJudul.innerHTML = '📢 PANGGILAN ULANG 📢';
         else overlayJudul.innerHTML = '⏰ WAKTU KUNJUNGAN HABIS ⏰';
@@ -571,7 +543,6 @@
 
       overlay.style.display = 'flex';
 
-      // Tutup otomatis setelah 12 detik
       if (overlayTimeout) clearTimeout(overlayTimeout);
       overlayTimeout = setTimeout(() => {
         if (overlay) overlay.style.display = 'none';
@@ -620,7 +591,6 @@
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">⏳ Sinkronisasi waktu......</td></tr>';
         return;
       }
-      // Urutkan dari terbaru ke terlama
       const sorted = [...daftarData].sort((a,b) => {
         const ta = a.createdAt?.toDate?.()?.getTime() || 0;
         const tb = b.createdAt?.toDate?.()?.getTime() || 0;
@@ -631,17 +601,12 @@
       for (const item of sorted) {
         const status = hitungStatus(item);
         const nomor = item.nomor || '—';
-        // Jika selesai dan belum dipanggil, panggil otomatis
         if (status.selesai && !item.sudahDipanggil) {
-          // Tandai sudah dipanggil di Firestore
           db.collection('antrian').doc(item.id).update({ sudahDipanggil: true })
             .then(() => {
               item.sudahDipanggil = true;
-              // Panggil suara & overlay
               addToQueue(panggilSekali, nomor, item.nama, item.wbp);
               broadcastTimeoutOverlay(item.id, nomor, item.nama, item.wbp);
-              // Tampilkan notifikasi
-              tampilkanNotifikasi(`⏰ WAKTU HABIS: ${item.nama} → ${item.wbp}`, '#dc2626');
             })
             .catch(e => console.warn('Gagal update sudahDipanggil:', e));
         }
@@ -658,17 +623,7 @@
         </tr>`;
       }
       tbody.innerHTML = html;
-
-      // Panggil render lagi setelah 2 detik (update status)
       setTimeout(renderTabel, 2000);
-    }
-
-    // ================== NOTIFIKASI VISUAL ==================
-    function tampilkanNotifikasi(pesan, warna = '#2a7f62') {
-      if (!notifBox) return;
-      notifBox.innerHTML = `<div style="background:${warna}; color:white; padding:14px 28px; border-radius:40px; font-weight:bold; box-shadow:0 4px 15px rgba(0,0,0,0.3);">${pesan}</div>`;
-      notifBox.style.display = 'block';
-      setTimeout(() => { notifBox.style.display = 'none'; }, 5000);
     }
 
     // ================== FUNGSI GLOBAL UNTUK TOMBOL ==================
@@ -677,7 +632,6 @@
       if (!confirm('Yakin ingin menghapus antrian ini?')) return;
       try {
         await db.collection('antrian').doc(id).delete();
-        tampilkanNotifikasi('✅ Data berhasil dihapus', '#2a7f62');
       } catch(e) {
         console.error('Gagal hapus:', e);
         alert('Gagal hapus data: '+e.message);
@@ -691,9 +645,7 @@
         const batch = db.batch();
         snapshot.forEach(doc => batch.delete(doc.ref));
         await batch.commit();
-        // Reset counter
         await db.collection('counter').doc('antrianCounter').set({ value: 0 });
-        tampilkanNotifikasi('🗑 Semua data telah dihapus', '#2a7f62');
       } catch(e) {
         console.error('Gagal hapus semua:', e);
         alert('Gagal hapus semua: '+e.message);
@@ -702,11 +654,8 @@
 
     window.ulangiPanggilanRow = function(nomor, nama, wbp) {
       if (!nomor || !nama || !wbp) return;
-      // Kirim perintah panggilan (suara) dan broadcast overlay
       kirimPerintahPanggilan(nomor, nama, wbp);
-      // broadcast overlay sudah ditangani oleh listener perintah, tapi kita kirim langsung juga
       broadcastUlangOverlay(nomor, nama, wbp);
-      tampilkanNotifikasi(`📡 Perintah panggilan ulang antrian ${nomor} dikirim`, '#0f5c6e');
     };
 
     // ================== LISTENER DATA ANTRIAN ==================
@@ -720,12 +669,11 @@
       }, (error) => {
         console.error('Listener antrian error:', error);
         debug('Error listener antrian: '+error.message);
-        // Coba reconnect setelah 5 detik
         setTimeout(startAntrianListener, 5000);
       });
     }
 
-    // ================== SILENT MARK: tandai expired tanpa suara/overlay ==================
+    // ================== SILENT MARK ==================
     async function silentMarkExpired() {
       if (!isOffsetReady) {
         debug('Silent mark ditunda (waktu belum siap)');
@@ -747,7 +695,7 @@
         }
         if (needsCommit) {
           await batch.commit();
-          debug('Silent mark: menandai antrian expired yang belum dipanggil');
+          debug('Silent mark: menandai antrian expired');
         }
       } catch(e) {
         console.warn('Silent mark gagal:', e);
@@ -758,23 +706,13 @@
     // ================== INISIALISASI ==================
     window.onload = async function() {
       debug('Dashboard dimulai...');
-
-      // Tombol tutup overlay
       document.getElementById('tutupOverlayBtn').addEventListener('click', tutupOverlayManual);
 
-      // Kalibrasi waktu
       await calibrateServerTime();
-
-      // Inisialisasi suara (coba ambil voices)
       try { await getSuaraPerempuan(); } catch(e) {}
 
-      // Silent mark untuk data yang sudah expired
       await silentMarkExpired();
-
-      // Mulai listener antrian
       startAntrianListener();
-
-      // Jalankan silent mark setiap 30 detik
       setInterval(silentMarkExpired, 30000);
 
       debug('Dashboard siap');
